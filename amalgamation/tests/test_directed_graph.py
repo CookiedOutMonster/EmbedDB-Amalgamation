@@ -9,11 +9,47 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import amalgamation as source
 
 class TestDirectedGraph(unittest.TestCase):
-
+    
+    # Test specific directories  
     current_dir = os.path.dirname(os.path.abspath(__file__))
     test_files = os.path.join(current_dir, 'test_files')
-    embedDB = os.path.join(current_dir, 'test_files', 'EmbedDB')
+    embedDB = os.path.join(current_dir, 'test_files', 'EmbedDB') # test files embedDB 
 
+    # Project specific directories
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    PROJECT_EMBEDDB = os.path.join(PROJECT_ROOT, "embedDB")
+
+    c_stand = {
+        "#include <assert.h>",
+        "#include <complex.h>",
+        "#include <ctype.h>",
+        "#include <errno.h>",
+        "#include <fenv.h>",
+        "#include <float.h>",
+        "#include <inttypes.h>",
+        "#include <iso646.h>",
+        "#include <limits.h>",
+        "#include <locale.h>",
+        "#include <math.h>",
+        "#include <setjmp.h>",
+        "#include <signal.h>",
+        "#include <stdalign.h>",
+        "#include <stdarg.h>",
+        "#include <stdatomic.h>",
+        "#include <stdbool.h>",
+        "#include <stddef.h>",
+        "#include <stdint.h>",
+        "#include <stdio.h>",
+        "#include <stdlib.h>",
+        "#include <stdnoreturn.h>",
+        "#include <string.h>",
+        "#include <tgmath.h>",
+        "#include <threads.h>",
+        "#include <time.h>",
+        "#include <uchar.h>",
+        "#include <wchar.h>",
+        "#include <wctype.h>"
+    }
 
     complex_dir_graph = {
         'A': ['B', 'C'],
@@ -68,7 +104,7 @@ class TestDirectedGraph(unittest.TestCase):
         This test ensures that the retrieve_source_set function returns a set for all of the header and .c files
         '''
 
-        master_h_test = source.retrieve_source_set(self.embedDB, 'h')
+        master_h_test = source.retrieve_source_set(self.embedDB, 'h', self.c_stand)
 
         test_h_result = {
             'advancedQueries.h',
@@ -83,7 +119,9 @@ class TestDirectedGraph(unittest.TestCase):
             file = h.file_name
             self.assertEqual(file in test_h_result, True)
 
-        master_c_test = source.retrieve_source_set(self.embedDB, 'c')
+        
+
+        master_c_test = source.retrieve_source_set([self.embedDB], 'c')
 
         test_c_result = {
             'advancedQueries.c',
@@ -116,8 +154,8 @@ class TestDirectedGraph(unittest.TestCase):
         }
 
         # set of objects containing source files (fileNode)
-        master_h = source.retrieve_source_set(self.embedDB, 'h')
-        master_c = source.retrieve_source_set(self.embedDB, 'c')
+        master_h = source.retrieve_source_set([self.embedDB], 'h')
+        master_c = source.retrieve_source_set([self.embedDB], 'c')
 
         # set of c-standard library that the amaglamation requires
         c_standard_dep = source.combine_c_standard_lib([master_h, master_c])
@@ -137,7 +175,7 @@ class TestDirectedGraph(unittest.TestCase):
         }
         
         # get headers
-        master_h = source.retrieve_source_set(self.embedDB, 'h')
+        master_h = source.retrieve_source_set([self.embedDB], 'h')
 
         # create directed graph
         directed_graph = source.create_directed_graph(master_h)
@@ -151,7 +189,7 @@ class TestDirectedGraph(unittest.TestCase):
         '''
 
         # get headers
-        master_h = source.retrieve_source_set(self.embedDB, 'h')
+        master_h = source.retrieve_source_set([self.embedDB], 'h')
 
         # create directed graph
         directed_graph = source.create_directed_graph(master_h)
@@ -225,7 +263,7 @@ class TestDirectedGraph(unittest.TestCase):
         '''
 
         # Get headers
-        master_h = source.retrieve_source_set(self.embedDB, 'h')
+        master_h = source.retrieve_source_set([self.embedDB], 'h')
 
         # Create directed graph
         directed_graph = source.create_directed_graph(master_h)

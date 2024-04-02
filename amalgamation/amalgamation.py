@@ -17,9 +17,6 @@ DEFINE_SEARCH_METHOD_REGEX = '#define SEARCH_METHOD [1-9]'
 DEFINE_RADIX_BITS_REGEX = '#define RADIX_BITS [1-9]'
 DEFINE_PRINT_ERRORS_REGEX = '#define PRINT_ERRORS'
 
-# DIRECTORIES
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # C-standard library 
 c_stand = {
     "#include <assert.h>",
@@ -78,29 +75,41 @@ def read_file(directory):
         sys.exit(1) 
 
 
-def save_file(source, file_name, extension):
+def save_file(source, file_name, extension, directory=None):
     '''
-    Writes the provided source content to a file with the specified file name and extension.
+    Writes the provided source content to a file with the specified file name and extension in the specified directory or a default directory if none is specified.
 
-    This function creates a new file or overwrites an existing file with the given file name and extension. It writes the source content to this file. 
+    This function creates a new file or overwrites an existing file in the specified directory (or the default directory if none is provided) with the given file name and extension. It writes the source content to this file. 
     The function expects the extension to be provided without a preceding dot (e.g., "txt" instead of ".txt"). 
-    If an error occurs during file writing (such as permission issues or an invalid file name), the function will catch and print the exception.
+    The directory should be provided as a path, which could be absolute or relative. If the directory is not provided, the file will be saved in the current working directory.
+    If an error occurs during file writing (such as permission issues, an invalid file name, or issues creating the directory), the function will catch and print the exception.
 
     :param source: The content to be written to the file. This should be a string.
     :param file_name: The name of the file without the extension. This should be a string.
-    :param extension: The extension of the file without a preceding dot. This function expects values like 'c' or 'h' for C and header files, respectively.
+    :param extension: The extension of the file without a preceding dot. This function expects values like 'txt' for text files, 'py' for Python files, etc.
+    :param directory: The path to the directory where the file will be saved. If None, the file will be saved in the current working directory.
 
     :return: None. The function does not return a value but prints an error message if an exception occurs.
 
     :raises Exception: Catches any exceptions that occur during file writing and prints them. The function does not re-raise the exceptions.
     '''
-    file = file_name + '.' + extension
+    if directory is None:
+        directory = os.getcwd()  # Use current working directory if no directory is provided
+
+    if not os.path.exists(directory):
+        try:
+            os.makedirs(directory)
+        except OSError as e:
+            sys.stderr.write(f"An error occurred creating the directory: {e}\n")
+            sys.exit(1)
+    
+    file_path = os.path.join(directory, file_name + '.' + extension)
     try:
-        with open(file, "w") as file:
+        with open(file_path, "w") as file:
             file.write(source)
     except Exception as e:
         sys.stderr.write(f"An error occurred saving the file: {e}\n")
-        sys.exit(1) 
+        sys.exit(1)
 
 
 def get_all_files_of_type(directory, file_extension):
@@ -203,27 +212,39 @@ def format_external_lib(incoming_lib):
 Dealing with FileNode
 '''
 
-def retrieve_source_set(source_dir, file_type):
+def retrieve_source_set(source_dir, file_type, c_lib=c_stand):
     '''
     Generates a set of FileNode objects for each file of a specified type in a source directory and its subdirectories.
 
     This function scans a given directory and its subdirectories for files with a specified extension. It creates a FileNode object for each file found and adds it to a set, 
     ensuring that each file is represented uniquely. 
 
-    :param source_dir: The path to the directory containing the source files. This function will also search all subdirectories.
+    :param source_dir: The path to the directory containing the source files. This function will also search all subdirectories. Can take either a string or a list. 
     :param file_type: The file extension of the files to be processed (e.g., 'h' for C header files or 'c' for C source files).
 
     :returns: A set of FileNode objects, each representing a unique file of the specified type found in the source directory and its subdirectories.
 
     Note: The FileNode class should be defined elsewhere in the code, and it should have a constructor that accepts a file path as a parameter.
     '''
+
+    if(isinstance(source_dir, str)):
+        source_dir = [source_dir]
+
     file_set = set()
-    dirs = sorted(get_all_files_of_type(source_dir, file_type))
+    dirs = []  # list of strings
+
+    for source in source_dir:
+        print(source)
+        files = get_all_files_of_type(source, file_type)
+        dirs.extend(files)
+
+    # alphabeitcalize for deterministic results 
+    dirs = sorted(dirs)
 
     if(dirs):
         for dir in dirs:
             # create a new object for each file
-            file = FileNode(dir)
+            file = FileNode(dir, c_lib)
             # append to the set
             file_set.add(file)
         return file_set
@@ -429,7 +450,7 @@ class FileNode():
     file_name = ''
     contents = ''
 
-    def __init__(self, file_dir):
+    def __init__(self, file_dir, c_lib):
         '''
         Initializes the FileNode instance, reads the file, and processes its dependencies.
 
@@ -457,21 +478,39 @@ class FileNode():
         # retrieve included libraries
         includes = retrieve_pattern_from_source(original, REGEX_INCLUDE)
         # find local dependencies
-        self.header_dep = check_against_standard_library(c_stand, includes, self.c_stand_dep)
+        self.header_dep = check_against_standard_library(c_lib, includes, self.c_stand_dep)
         # remove includes and assign source
         self.contents = remove_pattern_from_source(original, REGEX_INCLUDE)
         # format local dependencies
         self.header_dep = format_external_lib(self.header_dep)
 
-def amalgamate(dir):
+def amalgamate(dir, c_lib, file_name, save_directory=None, split_header_files = True):
+    '''
+    Amalgmates C source code similar to SQLite https://sqlite.org/amalgamation.html
+
+    Does this by reading in all .c and .h files in a directory, creates a FileNode object for each file which reads and saves the contents, then parses through the content to find which
+    libraries it uses, and saves two dependency lists. The first one, 'c_stand_dep', is a list containing the standard c-lib that the file relies on, which is also specified as an argument
+    to this function so useres can modify this depending on the project. The second dependency list, 'header_dep', is all the different header files inside the directory each source file relies upon. 
+    A topological sort is perfomed on that dependency list to create a non-unqiue though somewhat determinsitc ordering of the file dependency. It is somewhat determinsitic because retrieve_source_set
+    returns files alphabetically sorted. 
+
+    :param dir: a directory pointing to the source file you would like to amalgamate
+    :param c_lib:  set of standard c libraries that are not in your project source files. These libraries are not used in topological sorting so they will not be amaglamated. 
+    May change depending on the nature of your project.
+    :param file_name: the name of the amalgamated file 
+    :param save_directory: the directory you would like the amalgamation files saved too. Saves to the root directory by default. 
+    :param split_header_files: An optional boolean argument that prevents the amalgamation from splitting the source files. 
+
+    
+    '''
     
 
     '''
-    Create a set of FileNode objects for each file type. FileNode objects will automatically parse the file, clean, compare with the C stand-lib defined above, 
+    Create a set of FileNode objects for each file type. FileNode objects will automatically parse the file, clean, compare with the C stand-lib defined as an argument, 
     and create a small dependency graph. Sets are used to maintain uniqueness.
     '''
-    header_file_nodes = retrieve_source_set(dir, 'h')
-    source_file_nodes = retrieve_source_set(dir, 'c')
+    header_file_nodes = retrieve_source_set(dir, 'h', c_lib)
+    source_file_nodes = retrieve_source_set(dir, 'c', c_lib)
    
     '''
     Since each FileNode object contains a set of which files they rely on, combining into a global set is nec to amalgamation.
@@ -496,33 +535,26 @@ def amalgamate(dir):
     # combine sources. 
     amalg_h = create_amalgamation(c_standard_dep)+ create_amalgamation(sorted_h)
     amalg_c = '#include "./EmbedDB.h"\n' + create_amalgamation(source_file_nodes)
-    # save
-    save_file(amalg_h, "EmbedDB", "h")
-    save_file(amalg_c, "EmbedDB", "c")
+   
+     # save
+    if(split_header_files):
+        save_file(amalg_h, file_name, "h", save_directory)
+        save_file(amalg_c, file_name, "c", save_directory)
+    else:
+        save_file(amalg_h + "\n" + amalg_c, file_name, "c", save_directory)
 
 
 
 def main():
-    '''
-    # get source directory 
-    embedDB = os.path.join('Implementation', 'code', 'tests', 'test_files', 'EmbedDB')
-    # set of objects containing source files (fileNode)
-    header_file_nodes = retrieve_source_set(embedDB, 'h')
-    source_file_nodes = retrieve_source_set(embedDB, 'c')
-    # set of c-standard library that the amaglamation requires
-    c_standard_dep = combine_c_standard_lib([header_file_nodes, source_file_nodes])
-    # transform the header objects into a directed graph, nodes are file_names, edges are their dependencies
-    dir_graph = create_directed_graph(header_file_nodes)
-    # perform a topological sort and retrieve order for Amalgamation: not unique!
-    sorted_graph = topsort(dir_graph)
-    # compare sorted graph with source files
-    sorted_h = order_file_nodes_by_sorted_filenames(header_file_nodes, sorted_graph)
-    # combine sources
-    amalg_h = create_amalgamation(c_standard_dep)+ create_amalgamation(sorted_h)
-    amalg_c = '#include "./EmbedDB.h"\n' + create_amalgamation(source_file_nodes)
-    # save
-    save_file(amalg_h, "EmbedDB", "h")
-    save_file(amalg_c, "EmbedDB", "c")
-    '''
+
+    # DIRECTORIES
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    EMBEDDB = os.path.join(PROJECT_ROOT, "embedDB")
+
+    print(EMBEDDB)
+
+    # create standard embedDB amalgamation
+    #amalgamate(os.path.dirname(os.path.abspath(__file__)), c_stand, "embedDB")
+
     
 main()
